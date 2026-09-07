@@ -1,0 +1,23 @@
+# Rendered by entrypoint.sh. cupsd runs unprivileged, so User/Group here match
+# the container uid/gid - no setuid transition happens at any point.
+User cupsrun
+Group cupsrun
+SystemGroup lpadmin
+
+ServerRoot   ${CUPS_HOME}
+ConfigFilePerm 0640
+LogFilePerm    0640
+
+DataDir     /usr/share/cups
+DocumentRoot /usr/share/cups/doc-root
+RequestRoot /var/spool/cups
+CacheDir    /var/cache/cups
+StateDir    /run/cups
+TempDir     /var/spool/cups/tmp
+
+FileDevice No
+Printcap /run/cups/printcap
+PrintcapFormat BSD
+
+# Sandboxing is a no-op on Linux containers but keep the directive explicit.
+Sandboxing relaxed

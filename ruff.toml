@@ -1,0 +1,31 @@
+# Pinned so local runs and CI agree. `ruff check` with no config picks up new
+# rules on every release, which turns a linter into a flaky dependency.
+target-version = "py311"        # Debian bookworm ships CPython 3.11
+line-length = 110
+src = ["rootfs/opt/cups-exporter"]
+
+[lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import sorting
+  "UP",       # pyupgrade
+  "B",        # bugbear
+  "C4",       # comprehensions
+  "PERF",     # performance anti-patterns
+  "PIE",
+  "RET",
+  "SIM",
+  # PTH intentionally omitted: the page_log tail works on byte offsets and
+  # os.stat/open are the clearer primitives there.
+  "EXE",      # shebang / exec-bit consistency
+  "RUF",
+]
+ignore = [
+  # The exporter must never take a pod down: a bare `except Exception` around the
+  # scrape is deliberate, and the failure is surfaced as cups_up=0 plus a counter.
+  "BLE001",
+]
+
+[lint.per-file-ignores]
+"**/cups_exporter.py" = ["PLR0912", "PLR0915"]  # collect() is intentionally linear

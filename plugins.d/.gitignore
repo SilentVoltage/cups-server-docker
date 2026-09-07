@@ -1,0 +1,8 @@
+# Vendor driver blobs are usually non-redistributable - keep them out of git by
+# default. Force-add with `git add -f` in a private repo if you have accepted
+# the vendor EULA. See README.md.
+*.deb
+*.rpm
+*.tar.gz
+!.gitignore
+!README.md

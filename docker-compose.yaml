@@ -1,0 +1,54 @@
+# Local dev only. host networking is required for mDNS printer discovery -
+# on macOS/Windows Docker Desktop this will NOT see your LAN printers.
+services:
+  cupsd:
+    build:
+      context: .
+      args:
+        CUPS_DRIVER_PACKAGES: "printer-driver-cups-pdf printer-driver-gutenprint printer-driver-escpr foomatic-db-compressed-ppds"
+    image: cups-server:dev
+    network_mode: host
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      CUPS_LOGLEVEL: info
+      CUPS_ALLOW_FROM: all
+      CUPS_SERVER_ALIAS: "*"
+    volumes:
+      - cups-etc:/etc/cups
+      - cups-spool:/var/spool/cups
+      - cups-cache:/var/cache/cups
+      - cups-log:/var/log/cups
+      - cups-run:/run/cups
+      - ./plugins.d:/plugins.d:ro
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+
+  exporter:
+    image: cups-server:dev
+    network_mode: host
+    read_only: true
+    depends_on: [cupsd]
+    entrypoint: ["/usr/bin/tini", "-g", "--", "python3", "/opt/cups-exporter/cups_exporter.py"]
+    environment:
+      CUPS_SERVER: localhost:631
+      EXPORTER_LISTEN_PORT: "9628"
+    volumes:
+      - cups-log:/var/log/cups:ro
+
+  browsed:
+    image: cups-server:dev
+    network_mode: host
+    depends_on: [cupsd]
+    entrypoint: ["/usr/bin/tini", "-g", "--", "/usr/local/bin/cups-browsed-entrypoint.sh"]
+    environment:
+      CUPS_SERVER: localhost:631
+    volumes:
+      - /run/dbus:/run/dbus:ro
+
+volumes:
+  cups-etc: {}
+  cups-spool: {}
+  cups-cache: {}
+  cups-log: {}
+  cups-run: {}

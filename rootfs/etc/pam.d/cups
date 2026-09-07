@@ -1,0 +1,12 @@
+# PAM stack for cupsd.
+#
+# CUPS validates Basic auth through PAM. The stock Debian stack checks
+# /etc/shadow, which a non-root container with a read-only rootfs cannot write -
+# so a password supplied via Kubernetes Secret could never be used. pam_pwdfile
+# reads an htpasswd-format file instead, which the entrypoint writes to the
+# (writable) CUPS config directory at startup from the mounted Secret.
+#
+# The file is only present when auth is enabled; without it every auth attempt
+# simply fails closed, which is the correct behaviour.
+auth       required   pam_pwdfile.so pwdfile=/etc/cups/admin.passwd
+account    required   pam_permit.so

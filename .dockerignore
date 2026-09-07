@@ -1,0 +1,9 @@
+.git
+.gitignore
+.github
+LICENSE
+*.md
+test/
+docker-compose.yaml
+Makefile
+.trivyignore

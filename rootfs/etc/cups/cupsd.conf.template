@@ -1,0 +1,95 @@
+# Rendered by entrypoint.sh via envsubst. Do not edit in-place: changes are
+# overwritten on restart. Use ${CUPS_HOME}/cupsd.conf.d/*.conf for drop-ins.
+
+LogLevel ${CUPS_LOGLEVEL}
+PageLogFormat %p %j %u %T %P %C %{job-billing} %{job-originating-host-name} %{job-name} %{media} %{sides}
+AccessLog stderr
+ErrorLog  stderr
+PageLog   /var/log/cups/page_log
+
+MaxLogSize 0
+MaxJobs ${CUPS_MAX_JOBS}
+MaxJobTime ${CUPS_MAX_JOB_TIME}
+PreserveJobHistory ${CUPS_PRESERVE_JOB_HISTORY}
+PreserveJobFiles ${CUPS_PRESERVE_JOB_FILES}
+
+# Never idle-exit inside a container: the orchestrator owns the lifecycle.
+IdleExitTimeout 0
+
+Listen 0.0.0.0:${CUPS_PORT}
+Listen /run/cups/cups.sock
+
+# Required when fronted by an Ingress/Service: cupsd rejects Host headers it
+# does not recognise with HTTP 400 unless they are whitelisted here.
+ServerAlias ${CUPS_SERVER_ALIAS}
+ServerName ${CUPS_SERVER_NAME}
+
+# Local advertisement is handled by the avahi sidecar / cups-browsed, not cupsd.
+Browsing ${CUPS_BROWSING}
+BrowseLocalProtocols dnssd
+
+WebInterface ${CUPS_WEB_INTERFACE}
+DefaultShared ${CUPS_DEFAULT_SHARED}
+DefaultAuthType Basic
+DefaultEncryption IfRequested
+
+<Location />
+  Order allow,deny
+  Allow ${CUPS_ALLOW_FROM}
+</Location>
+
+<Location /admin>
+  Order allow,deny
+  Allow ${CUPS_ALLOW_FROM}
+</Location>
+
+<Location /admin/conf>
+  AuthType ${CUPS_ADMIN_AUTHTYPE}
+  ${CUPS_ADMIN_REQUIRE}
+  Order allow,deny
+  Allow ${CUPS_ALLOW_FROM}
+</Location>
+
+<Location /admin/log>
+  AuthType ${CUPS_ADMIN_AUTHTYPE}
+  ${CUPS_ADMIN_REQUIRE}
+  Order allow,deny
+  Allow ${CUPS_ALLOW_FROM}
+</Location>
+
+<Policy default>
+  JobPrivateAccess default
+  JobPrivateValues default
+  SubscriptionPrivateAccess default
+  SubscriptionPrivateValues default
+
+  <Limit Create-Job Print-Job Print-URI Validate-Job>
+    Order deny,allow
+  </Limit>
+
+  <Limit Send-Document Send-URI Hold-Job Release-Job Restart-Job Purge-Jobs Set-Job-Attributes Create-Job-Subscription Renew-Subscription Cancel-Subscription Get-Notifications Reprocess-Job Cancel-Current-Job Suspend-Current-Job Resume-Job Cancel-My-Jobs Close-Job CUPS-Move-Job CUPS-Get-Document>
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit CUPS-Add-Modify-Printer CUPS-Delete-Printer CUPS-Add-Modify-Class CUPS-Delete-Class CUPS-Set-Default CUPS-Get-Devices>
+    AuthType ${CUPS_ADMIN_AUTHTYPE}
+    ${CUPS_ADMIN_REQUIRE}
+    Order deny,allow
+  </Limit>
+
+  <Limit Pause-Printer Resume-Printer Enable-Printer Disable-Printer Pause-Printer-After-Current-Job Hold-New-Jobs Release-Held-New-Jobs Deactivate-Printer Activate-Printer Restart-Printer Shutdown-Printer Startup-Printer Promote-Job Schedule-Job-After Cancel-Jobs CUPS-Accept-Jobs CUPS-Reject-Jobs>
+    AuthType ${CUPS_ADMIN_AUTHTYPE}
+    ${CUPS_ADMIN_REQUIRE}
+    Order deny,allow
+  </Limit>
+
+  <Limit Cancel-Job CUPS-Authenticate-Job>
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit All>
+    Order deny,allow
+  </Limit>
+</Policy>

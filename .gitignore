@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Build / scan artifacts
+sbom.spdx.json
+*.sarif
+.trivyignore
+
+# Editor / OS
+.DS_Store
+*.swp

@@ -1,0 +1,6 @@
+failure-threshold: warning
+ignored:
+  - DL3008  # pinning apt versions across arch/release matrices is unmaintainable here
+trustedRegistries:
+  - docker.io
+  - ghcr.io
