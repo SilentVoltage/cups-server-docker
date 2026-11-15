@@ -153,7 +153,7 @@ EXPOSE 631/tcp
 
 # HEALTHCHECK is a no-op in Kubernetes but useful for compose/local runs.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD /usr/local/bin/healthcheck.sh
+    CMD ["/usr/local/bin/healthcheck.sh"]
 
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["cupsd"]
