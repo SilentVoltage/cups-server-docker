@@ -1,0 +1,65 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":separateMajorReleases",
+    ":label(renovate)"
+  ],
+  "dockerfile": {
+    "enabled": true
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>RUFF_VERSION):\\s*\"?v?(?<currentValue>[0-9.]+)\"?"
+      ],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "ruff",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>TRIVY_VERSION):\\s*\"?v?(?<currentValue>[0-9.]+)\"?"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "aquasecurity/trivy",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>GITLEAKS_VERSION):\\s*\"?v?(?<currentValue>[0-9.]+)\"?"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "gitleaks/gitleaks",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "groupName": "CI Tool Versions",
+      "commitMessagePrefix": "chore(deps): update",
+      "commitMessageTopic": "{{depName}} version"
+    }
+  ],
+  "labels": [
+    "docker",
+    "devops",
+    "dependencies"
+  ]
+}

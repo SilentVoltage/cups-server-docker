@@ -1,13 +1,22 @@
-name: build
+name: Build and Publish Docker image
 
 on:
   push:
-    branches: [master]
-    tags: ["v*"]
+    branches: [ master ]
+    tags: [ 'v*' ]
   pull_request:
+    branches: [ master ]
   schedule:
-    - cron: "17 4 * * 1"
+    # Weekly rebuild picks up Debian security updates.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
 
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default; jobs opt into what they need.
 permissions:
   contents: read
 
@@ -16,24 +25,32 @@ env:
   IMAGE_NAME: ${{ vars.GHCR_REPOSITORY }}/cups-server
   DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE }}/cups-server
   PLATFORMS: linux/amd64,linux/arm64
+  CUPS_DRIVER_PACKAGES: ${{ vars.CUPS_DRIVER_PACKAGES || 'printer-driver-cups-pdf printer-driver-gutenprint printer-driver-escpr foomatic-db-compressed-ppds' }}
+  RUFF_VERSION: "0.16.1"
+  TRIVY_VERSION: "v0.76.1"
+  GITLEAKS_VERSION: "8.30.1"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: hadolint
-        uses: hadolint/hadolint-action@v3.1.0
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: Dockerfile
           config: .hadolint.yaml
-      - name: shellcheck
+
+      - name: Lint shell scripts (shellcheck)
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck -S warning rootfs/usr/local/bin/*.sh test/*.sh
-      - name: python lint
+
+      - name: Lint Python exporter (ruff)
         run: |
-          pipx install ruff==0.16.1
+          pipx install "ruff==${RUFF_VERSION}"
           ruff check --config ruff.toml rootfs/opt/cups-exporter/
           ruff format --check --config ruff.toml rootfs/opt/cups-exporter/
 
@@ -42,35 +59,89 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-      id-token: write      # cosign keyless
-      attestations: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      packages: write          # push to GHCR
+      id-token: write          # cosign keyless
+      security-events: write   # upload Trivy SARIF
+      actions: read            # codeql-action/upload-sarif on private repos
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
-      - name: Login to GHCR
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Test and scan one native build before anything is pushed; a multi-arch
+      # image with attestations cannot be loaded into the local Docker.
+      - name: Build image for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: cups-server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            CUPS_DRIVER_PACKAGES=${{ env.CUPS_DRIVER_PACKAGES }}
+
+      - name: Smoke test
+        run: ./test/smoke.sh cups-server:ci
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: cups-server:ci
+          format: sarif
+          output: trivy-results.sarif
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+          vuln-type: os,library
+
+      # Code scanning is free on public repos only; private ones need GitHub Code Security.
+      - name: Upload Trivy results to code scanning
+        if: always() && !github.event.repository.private
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Fail on CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: cups-server:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL
+          vuln-type: os,library
+        env:
+          # Reuse the vuln DB the SARIF scan above already pulled.
+          TRIVY_SKIP_DB_UPDATE: true
+          TRIVY_SKIP_JAVA_DB_UPDATE: true
+
+      - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY_GHCR }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub
+      - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}   # scoped access token, not the account password
 
-      - name: Docker metadata
+      - name: Derive image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        if: github.event_name != 'pull_request'
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
@@ -79,21 +150,20 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=branch
-            type=ref,event=pr
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=cups-server
             org.opencontainers.image.description=CUPS print server
 
-      - name: Build and push
+      - name: Build and push (multi-arch)
         id: build
-        uses: docker/build-push-action@v6
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ env.PLATFORMS }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
@@ -102,30 +172,12 @@ jobs:
           provenance: mode=max
           sbom: true
           build-args: |
-            CUPS_DRIVER_PACKAGES=${{ vars.CUPS_DRIVER_PACKAGES || 'printer-driver-cups-pdf printer-driver-gutenprint printer-driver-escpr foomatic-db-compressed-ppds' }}
+            CUPS_DRIVER_PACKAGES=${{ env.CUPS_DRIVER_PACKAGES }}
 
-      - name: Smoke test
-        if: github.event_name == 'pull_request'
-        run: ./test/smoke.sh $(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+      - name: Set up cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v4.1.2
 
-      - name: Trivy scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          format: sarif
-          output: trivy.sarif
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-        continue-on-error: true
-
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy.sarif
-        continue-on-error: true
-
-      - uses: sigstore/cosign-installer@v3
       - name: Sign images (keyless)
         if: github.event_name != 'pull_request'
         env:
@@ -134,19 +186,33 @@ jobs:
           cosign sign --yes "${REGISTRY_GHCR}/${IMAGE_NAME}@${DIGEST}"
           cosign sign --yes "${DOCKERHUB_IMAGE}@${DIGEST}"
 
-      # - name: Attest build provenance
-      #   if: github.event_name != 'pull_request'
-      #   uses: actions/attest-build-provenance@v1
-      #   with:
-      #     subject-name: ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
-      #     subject-digest: ${{ steps.build.outputs.digest }}
-      #     push-to-registry: true
-
       - name: Update Docker Hub description
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: peter-evans/dockerhub-description@v4
+        uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ env.DOCKERHUB_IMAGE }}
           readme-filepath: ./README.md
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Whole history: a secret removed later is still in old commits.
+          fetch-depth: 0
+
+      - name: Set up gitleaks
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" && cd "$RUNNER_TEMP/bin"
+          file="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSLO "$url/$file"
+          curl -fsSL "$url/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " $file\$" | sha256sum -c -
+          tar -xzf "$file" gitleaks && rm "$file"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Scan git history for secrets (gitleaks)
+        run: gitleaks git --redact --verbose .
