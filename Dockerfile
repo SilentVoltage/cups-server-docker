@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.9
+# syntax=docker/dockerfile:1.29
 # ---------------------------------------------------------------------------
 # CUPS server image
 #   * Debian base: only distro with sane coverage of foomatic/gutenprint/HPLIP
