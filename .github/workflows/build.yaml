@@ -26,8 +26,8 @@ env:
   DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE }}/cups-server
   PLATFORMS: linux/amd64,linux/arm64
   CUPS_DRIVER_PACKAGES: ${{ vars.CUPS_DRIVER_PACKAGES || 'printer-driver-cups-pdf printer-driver-gutenprint printer-driver-escpr foomatic-db-compressed-ppds' }}
-  RUFF_VERSION: "0.16.1"
-  TRIVY_VERSION: "v0.76.1"
+  RUFF_VERSION: "0.17.6"
+  TRIVY_VERSION: "v0.76.2"
   GITLEAKS_VERSION: "8.30.1"
 
 jobs:
